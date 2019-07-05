@@ -130,7 +130,7 @@ func NewParam() *Param {
 // immediately followed by a single linear white-space character (i.e., SPACE or HTAB).
 func unfold(text string) string {
 	return strings.NewReplacer("\r\n ", "", "\r\n\t", "").Replace(text)
-	return strings.Replace(text, "\r\n ", "", -1)
+	// return strings.Replace(text, "\r\n ", "", -1)
 }
 
 // next returns the next token.
