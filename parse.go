@@ -125,7 +125,11 @@ func NewParam() *Param {
 }
 
 // unfold convert multiple line value to one line
+// from rfc5545-3.1
+// a long line can be split between any two characters by inserting a CRLF
+// immediately followed by a single linear white-space character (i.e., SPACE or HTAB).
 func unfold(text string) string {
+	return strings.NewReplacer("\r\n ", "", "\r\n\t", "").Replace(text)
 	return strings.Replace(text, "\r\n ", "", -1)
 }
 
