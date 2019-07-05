@@ -10,6 +10,26 @@ import (
 
 var calendarList = []string{"fixtures/example.ics", "fixtures/with-alarm.ics", "fixtures/facebookbirthday.ics"}
 
+func Test_unfold(t *testing.T) {
+	t.Run("unfold case 1", func(t *testing.T) {
+		text := "1\r\n 2\r\n 3"
+		want := "123"
+		got := unfold(text)
+		if want != got {
+			t.Errorf("got '%s' want '%s'", got, want)
+		}
+	})
+	
+	t.Run("unfold case 2", func(t *testing.T) {
+		text := "1\r\n\t2\r\n\t3"
+		want := "123"
+		got := unfold(text)
+		if want != got {
+			t.Errorf("got '%s' want '%s'", got, want)
+		}
+	})
+}
+
 func TestParse(t *testing.T) {
 	for _, filename := range calendarList {
 		file, _ := os.Open(filename)
