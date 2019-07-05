@@ -18,9 +18,10 @@ calendar, err := ical.Parse(filename, nil)
 
 ## TODO
 
-* Implements Missing Properties on VEVENT
-* Implements VTODO
-* Implements VJOURNAL
-* Implements VFREEBUSY
-* Implements VTIMEZONE
-* Implements Missing Components Properties
+* [ ] Implements Missing Properties on VEVENT
+* [ ] Implements VTODO
+* [ ] Implements VJOURNAL
+* [ ] Implements VFREEBUSY
+* [ ] Implements VTIMEZONE
+* [ ] Implements Missing Components Properties
+ 
