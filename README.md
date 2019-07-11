@@ -8,7 +8,7 @@ Golang iCalendar lexer/parser implementing [RFC 5545](https://tools.ietf.org/htm
 
 ```go
 import (
-    "github.com/luxifer/ical"
+    "github.com/iswangwenbin/ical"
 )
 
 // filename is an io.Reader
@@ -32,10 +32,10 @@ calendar, err := ical.Parse(filename, nil)
 
 ## TODO
 
-* [ ] Implements Missing Properties on VEVENT
+* [-] Implements Missing Properties on VEVENT
 * [ ] Implements VTODO
 * [ ] Implements VJOURNAL
 * [ ] Implements VFREEBUSY
-* [ ] Implements VTIMEZONE
+* [-] Implements VTIMEZONE
 * [ ] Implements Missing Components Properties
  
