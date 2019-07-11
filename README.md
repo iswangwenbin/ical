@@ -22,13 +22,13 @@ calendar, err := ical.Parse(filename, nil)
 |---|---|---|
 | VCALENDAR | [RFC5545.Section 3.4](https://tools.ietf.org/html/rfc5545#section-3.4)     |  ✓ 
 | VEVENT    | [RFC5545.Section 3.6.1](https://tools.ietf.org/html/rfc5545#section-3.6.1) |  ✓  
+| VALARM    | [RFC5545.Section 3.6.6](https://tools.ietf.org/html/rfc5545#section-3.6.6) |  ✓
+| VTIMEZONE | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |  ✓
+| STANDARD  | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |  ✓
+| DAYLIGHT  | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |  ✓ 
 | VTODO     | [RFC5545.Section 3.6.2](https://tools.ietf.org/html/rfc5545#section-3.6.2) |
 | VJOURNAL  | [RFC5545.Section 3.6.3](https://tools.ietf.org/html/rfc5545#section-3.6.3) |
 | VFREEBUSY | [RFC5545.Section 3.6.4](https://tools.ietf.org/html/rfc5545#section-3.6.4) |
-| VTIMEZONE | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |
-| VALARM    | [RFC5545.Section 3.6.6](https://tools.ietf.org/html/rfc5545#section-3.6.6) |  ✓ 
-| STANDARD  | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |
-| DAYLIGHT  | [RFC5545.Section 3.6.5](https://tools.ietf.org/html/rfc5545#section-3.6.5) |
 
 ## TODO
 
