@@ -19,7 +19,7 @@ func Test_unfold(t *testing.T) {
 			t.Errorf("got '%s' want '%s'", got, want)
 		}
 	})
-	
+
 	t.Run("unfold case 2", func(t *testing.T) {
 		text := "1\r\n\t2\r\n\t3"
 		want := "123"

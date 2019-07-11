@@ -9,47 +9,6 @@ import (
 	"time"
 )
 
-// A Calendar represents the whole iCalendar
-type Calendar struct {
-	Properties []*Property
-	Events     []*Event
-	Prodid     string
-	Version    string
-	Calscale   string
-	Method     string
-}
-
-// An Event represent a VEVENT component in an iCalendar
-type Event struct {
-	Properties  []*Property
-	Alarms      []*Alarm
-	UID         string
-	Timestamp   time.Time
-	StartDate   time.Time
-	EndDate     time.Time
-	Summary     string
-	Description string
-}
-
-// An Alarm represent a VALARM component in an iCalendar
-type Alarm struct {
-	Properties []*Property
-	Action     string
-	Trigger    string
-}
-
-// A Property represent an unparsed property in an iCalendar component
-type Property struct {
-	Name   string
-	Params map[string]*Param
-	Value  string
-}
-
-// A Param represent a list of param for a property
-type Param struct {
-	Values []string
-}
-
 type parser struct {
 	lex       *lexer
 	token     [2]item
@@ -58,6 +17,9 @@ type parser struct {
 	c         *Calendar
 	v         *Event
 	a         *Alarm
+	t         *Timezone
+	s         *Standard
+	d         *Daylight
 	location  *time.Location
 }
 
@@ -69,59 +31,21 @@ func Parse(r io.Reader, l *time.Location) (*Calendar, error) {
 	p.c = NewCalendar()
 	p.scope = scopeCalendar
 	bytes, err := ioutil.ReadAll(r)
-
 	if err != nil {
 		return nil, err
 	}
 
+	// timezone
 	if l == nil {
 		l = time.Local
 	}
-
 	p.location = l
 
+	// 	single line
 	text := unfold(string(bytes))
 	p.lex = lex(text)
+
 	return p.parse()
-}
-
-// NewCalendar creates an empty Calendar
-func NewCalendar() *Calendar {
-	c := &Calendar{
-		Calscale: "GREGORIAN",
-	}
-	c.Properties = make([]*Property, 0)
-	c.Events = make([]*Event, 0)
-	return c
-}
-
-// NewProperty creates an empty Property
-func NewProperty() *Property {
-	p := &Property{}
-	p.Params = make(map[string]*Param)
-	return p
-}
-
-// NewEvent creates an empty Event
-func NewEvent() *Event {
-	v := &Event{}
-	v.Properties = make([]*Property, 0)
-	v.Alarms = make([]*Alarm, 0)
-	return v
-}
-
-// NewAlarm creates an empty Alarm
-func NewAlarm() *Alarm {
-	a := &Alarm{}
-	a.Properties = make([]*Property, 0)
-	return a
-}
-
-// NewParam creates an empty Param
-func NewParam() *Param {
-	p := &Param{}
-	p.Values = make([]string, 0)
-	return p
 }
 
 // unfold convert multiple line value to one line
@@ -130,7 +54,6 @@ func NewParam() *Param {
 // immediately followed by a single linear white-space character (i.e., SPACE or HTAB).
 func unfold(text string) string {
 	return strings.NewReplacer("\r\n ", "", "\r\n\t", "").Replace(text)
-	// return strings.Replace(text, "\r\n ", "", -1)
 }
 
 // next returns the next token.
@@ -159,13 +82,18 @@ func (p *parser) peek() item {
 }
 
 // enterScope switch scope between Calendar, Event and Alarm
-func (p *parser) enterScope() {
-	p.scope++
+func (p *parser) enterScope(scope int) {
+	p.scope = scope
+	// p.scope++
 }
 
 // leaveScope returns to previous scope
-func (p *parser) leaveScope() {
-	p.scope--
+func (p *parser) leaveScope(scope int) {
+	if scope == -1 {
+		p.scope--
+	} else {
+		p.scope = scope
+	}
 }
 
 // parse
@@ -174,6 +102,9 @@ const (
 	scopeCalendar int = iota
 	scopeEvent
 	scopeAlarm
+	scopeTimezone
+	scopeStandard
+	scopeDaylight
 )
 
 const (
@@ -195,11 +126,9 @@ func (p *parser) parse() (*Calendar, error) {
 
 	for {
 		err := p.scanContentLine()
-
 		if err == errorDone {
 			break
 		}
-
 		if err != nil {
 			return nil, err
 		}
@@ -216,7 +145,7 @@ func (p *parser) scanDelimiter(delim item) error {
 		}
 
 		p.v = NewEvent()
-		p.enterScope()
+		p.enterScope(scopeEvent)
 
 		if item := p.next(); item.typ != itemLineEnd {
 			return fmt.Errorf("found %s, expected CRLF", item)
@@ -224,17 +153,91 @@ func (p *parser) scanDelimiter(delim item) error {
 	}
 
 	if delim.typ == itemEndVEvent {
-		if p.scope > scopeEvent {
-			return fmt.Errorf("found %s, expeced END:VALARM", delim)
-		}
+		//if p.scope > scopeEvent {
+		//	return fmt.Errorf("found %s, expeced END:VALARM", delim)
+		//}
 
 		if err := p.validateEvent(p.v); err != nil {
 			return err
 		}
 
 		p.c.Events = append(p.c.Events, p.v)
-		p.leaveScope()
+		p.leaveScope(scopeCalendar)
 
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemBeginVTimezone {
+		if err := p.validateTimezone(p.t); err != nil {
+			return err
+		}
+
+		p.t = NewTimezone()
+		p.enterScope(scopeTimezone)
+
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemEndVTimezone {
+		//if p.scope > scopeEvent {
+		//	return fmt.Errorf("found %s, expeced END:VALARM", delim)
+		//}
+
+		if err := p.validateTimezone(p.t); err != nil {
+			return err
+		}
+
+		p.c.Timezones = append(p.c.Timezones, p.t)
+		p.leaveScope(scopeCalendar)
+
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemBeginStandard {
+		if err := p.validateStandard(p.s); err != nil {
+			return err
+		}
+		p.s = NewStandard()
+		p.enterScope(scopeStandard)
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemEndStandard {
+		if err := p.validateStandard(p.s); err != nil {
+			return err
+		}
+		p.t.Standards = append(p.t.Standards, p.s)
+		p.leaveScope(scopeTimezone)
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemBeginDaylight {
+		if err := p.validateDaylight(p.d); err != nil {
+			return err
+		}
+		p.d = NewDaylight()
+		p.enterScope(scopeDaylight)
+		if item := p.next(); item.typ != itemLineEnd {
+			return fmt.Errorf("found %s, expected CRLF", item)
+		}
+	}
+
+	if delim.typ == itemEndDaylight {
+		if err := p.validateDaylight(p.d); err != nil {
+			return err
+		}
+		p.t.Daylights = append(p.t.Daylights, p.d)
+		p.leaveScope(scopeTimezone)
 		if item := p.next(); item.typ != itemLineEnd {
 			return fmt.Errorf("found %s, expected CRLF", item)
 		}
@@ -242,7 +245,7 @@ func (p *parser) scanDelimiter(delim item) error {
 
 	if delim.typ == itemBeginVAlarm {
 		p.a = NewAlarm()
-		p.enterScope()
+		p.enterScope(scopeAlarm)
 
 		if item := p.next(); item.typ != itemLineEnd {
 			return fmt.Errorf("found %s, expected CRLF", item)
@@ -255,7 +258,7 @@ func (p *parser) scanDelimiter(delim item) error {
 		}
 
 		p.v.Alarms = append(p.v.Alarms, p.a)
-		p.leaveScope()
+		p.leaveScope(scopeEvent)
 
 		if item := p.next(); item.typ != itemLineEnd {
 			return fmt.Errorf("found %s, expected CRLF", item)
@@ -310,14 +313,22 @@ func (p *parser) scanContentLine() error {
 		return fmt.Errorf("found %s, expected CRLF", name)
 	}
 
-	if p.scope == scopeCalendar {
+	switch p.scope {
+	case scopeCalendar:
 		p.c.Properties = append(p.c.Properties, prop)
-	} else if p.scope == scopeEvent {
+	case scopeEvent:
 		p.v.Properties = append(p.v.Properties, prop)
-	} else if p.scope == scopeAlarm {
+	case scopeAlarm:
 		p.a.Properties = append(p.a.Properties, prop)
+	case scopeTimezone:
+		p.t.Properties = append(p.t.Properties, prop)
+	case scopeDaylight:
+		p.d.Properties = append(p.d.Properties, prop)
+	case scopeStandard:
+		p.s.Properties = append(p.s.Properties, prop)
+	default:
+		return fmt.Errorf("scope %d, expected =", p.scope)
 	}
-
 	return nil
 }
 
@@ -377,138 +388,6 @@ func (p *parser) scanValues(param *Param) error {
 
 		param.Values = append(param.Values, paramValue.val)
 	}
-}
-
-// validateCalendar validate calendar props
-func (p *parser) validateCalendar(c *Calendar) error {
-	requiredCount := 0
-	for _, prop := range c.Properties {
-		if prop.Name == "PRODID" {
-			c.Prodid = prop.Value
-			requiredCount++
-		}
-
-		if prop.Name == "VERSION" {
-			c.Version = prop.Value
-			requiredCount++
-		}
-
-		if prop.Name == "CALSCALE" {
-			c.Calscale = prop.Value
-		}
-
-		if prop.Name == "METHOD" {
-			c.Method = prop.Value
-		}
-	}
-
-	if requiredCount != 2 {
-		return fmt.Errorf("missing either required property \"prodid / version /\"")
-	}
-
-	return nil
-}
-
-// validateEvent validate event props
-func (p *parser) validateEvent(v *Event) error {
-	uniqueCount := make(map[string]int)
-
-	for _, prop := range v.Properties {
-		if prop.Name == "UID" {
-			v.UID = prop.Value
-			uniqueCount["UID"]++
-		}
-
-		if prop.Name == "DTSTAMP" {
-			v.Timestamp, _ = parseDate(prop, p.location)
-			uniqueCount["DTSTAMP"]++
-		}
-
-		if prop.Name == "DTSTART" {
-			v.StartDate, _ = parseDate(prop, p.location)
-			uniqueCount["DTSTART"]++
-		}
-
-		if prop.Name == "DTEND" {
-			if hasProperty("DURATION", v.Properties) {
-				return fmt.Errorf("Either \"dtend\" or \"duration\" MAY appear")
-			}
-			v.EndDate, _ = parseDate(prop, p.location)
-			uniqueCount["DTEND"]++
-		}
-
-		if prop.Name == "DURATION" {
-			if hasProperty("DTEND", v.Properties) {
-				return fmt.Errorf("Either \"dtend\" or \"duration\" MAY appear")
-			}
-			uniqueCount["DURATION"]++
-		}
-
-		if prop.Name == "SUMMARY" {
-			v.Summary = prop.Value
-			uniqueCount["SUMMARY"]++
-		}
-
-		if prop.Name == "DESCRIPTION" {
-			v.Description = prop.Value
-			uniqueCount["DESCRIPTION"]++
-		}
-	}
-
-	if p.c.Method == "" && v.Timestamp.IsZero() {
-		return fmt.Errorf("missing required property \"dtstamp\"")
-	}
-
-	if v.UID == "" {
-		return fmt.Errorf("missing required property \"uid\"")
-	}
-
-	if v.StartDate.IsZero() {
-		return fmt.Errorf("missing required property \"dtstart\"")
-	}
-
-	for key, value := range uniqueCount {
-		if value > 1 {
-			return fmt.Errorf("\"%s\" property must not occur more than once", key)
-		}
-	}
-
-	if !hasProperty("DTEND", v.Properties) {
-		v.EndDate = v.StartDate.Add(time.Hour * 24) // add one day to start date
-	}
-
-	return nil
-}
-
-// validateAlarm validate alarm props
-func (p *parser) validateAlarm(a *Alarm) error {
-	requiredCount := 0
-	uniqueCount := make(map[string]int)
-	for _, prop := range a.Properties {
-		if prop.Name == "ACTION" {
-			a.Action = prop.Value
-			requiredCount++
-			uniqueCount["ACTION"]++
-		}
-
-		if prop.Name == "TRIGGER" {
-			a.Trigger = prop.Value
-			requiredCount++
-			uniqueCount["TRIGGER"]++
-		}
-	}
-
-	if requiredCount != 2 {
-		return fmt.Errorf("missing either required property \"action / trigger /\"")
-	}
-
-	for key, value := range uniqueCount {
-		if value > 1 {
-			return fmt.Errorf("\"%s\" property must not occur more than once", key)
-		}
-	}
-
-	return nil
 }
 
 // hasProperty checks if a given component has a certain property

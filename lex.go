@@ -3,33 +3,8 @@ package ical
 import (
 	"fmt"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
-
-// item represents a token or text string returned from the scanner.
-type item struct {
-	typ itemType // The type of this item.
-	pos int      // The starting position, in bytes, of this item in the input string.
-	val string   // The value of this item.
-}
-
-func (i item) String() string {
-	switch {
-	case i.typ == itemEOF:
-		return "EOF"
-	case i.typ == itemError:
-		return i.val
-	case i.typ > itemKeyword:
-		return fmt.Sprintf("<%s>", i.val)
-	case len(i.val) > 10:
-		return fmt.Sprintf("%.10q...", i.val)
-	}
-	return fmt.Sprintf("%q", i.val)
-}
-
-// itemType identifies the type of lex items.
-type itemType int
 
 const (
 	// Special tokens
@@ -44,21 +19,27 @@ const (
 	itemValue
 
 	// Punctuation
-	itemColon     // :
-	itemSemiColon // ;
-	itemEqual     // =
-	itemComma     // ,
+	itemColon      // :
+	itemSemiColon  // ;
+	itemEqual      // =
+	itemComma      // ,
 
 	// Keyword
-	itemKeyword // delimit the keyword list
+	itemKeyword  // delimit the keyword list
 
 	// Delimiters
-	itemBeginVCalendar
-	itemEndVCalendar
-	itemBeginVEvent
-	itemEndVEvent
-	itemBeginVAlarm
-	itemEndVAlarm
+	itemBeginVCalendar  // BEGIN:VCALENDAR
+	itemEndVCalendar    // END:VCALENDAR
+	itemBeginVEvent     // BEGIN:VEVENT
+	itemEndVEvent       // END:VEVENT
+	itemBeginVAlarm     // BEGIN:VALARM
+	itemEndVAlarm       // END:VALARM
+	itemBeginVTimezone  // BEGIN:VTIMEZONE
+	itemEndVTimezone    // END:VTIMEZONE
+	itemBeginStandard   // BEGIN:STANDARD
+	itemEndStandard     // END:STANDARD
+	itemBeginDaylight   // BEGIN:DAYLIGHT
+	itemEndDaylight     // END:DAYLIGHT
 )
 
 var key = map[string]itemType{
@@ -68,6 +49,12 @@ var key = map[string]itemType{
 	"END:VEVENT":      itemEndVEvent,
 	"BEGIN:VALARM":    itemBeginVAlarm,
 	"END:VALARM":      itemEndVAlarm,
+	"BEGIN:VTIMEZONE": itemBeginVTimezone,
+	"END:VTIMEZONE":   itemEndVTimezone,
+	"BEGIN:STANDARD":  itemBeginStandard,
+	"END:STANDARD":    itemEndStandard,
+	"BEGIN:DAYLIGHT":  itemBeginDaylight,
+	"END:DAYLIGHT":    itemEndDaylight,
 }
 
 const eof = -1
@@ -78,12 +65,12 @@ type stateFn func(*lexer) stateFn
 // lexer holds the state of the scanner.
 type lexer struct {
 	input   string    // the string being scanned
+	items   chan item // channel of scanned items
 	state   stateFn   // the next lexing function to enter
 	start   int       // start position of this item
 	pos     int       // current position in the input
 	width   int       // width of last rune read from input
 	lastPos int       // position of most recent item returned by nextItem
-	items   chan item // channel of scanned items
 }
 
 // lex creates a new scanner for the input string.
@@ -106,6 +93,10 @@ func (l *lexer) run() {
 
 // emit passes an item back to the client.
 func (l *lexer) emit(t itemType) {
+	if debug {
+		fmt.Printf("string: %+v [%s]\n", item{t, l.start, l.input[l.start:l.pos]}, l.input[l.start:l.pos])
+		fmt.Print("emit(): ", " start:", l.start, " pos:", l.pos, " t:", t, "\n\n")
+	}
 	l.items <- item{t, l.start, l.input[l.start:l.pos]}
 	l.start = l.pos
 }
@@ -130,6 +121,9 @@ func (l *lexer) next() rune {
 // peek returns but does not consume the next rune in the input.
 func (l *lexer) peek() rune {
 	r := l.next()
+	if debug {
+		fmt.Printf("peek(): %v %d %c\n", r, len(string(r)), r)
+	}
 	l.backup()
 	return r
 }
@@ -150,6 +144,9 @@ func (l *lexer) errorf(format string, args ...interface{}) stateFn {
 // Called by the parser, not in the lexing goroutine.
 func (l *lexer) nextItem() item {
 	item := <-l.items
+	if debug {
+		fmt.Printf("{{ %+v }}\n", item)
+	}
 	l.lastPos = item.pos
 	return item
 }
@@ -164,6 +161,12 @@ const (
 	endVEvent      = "END:VEVENT"
 	beginValarm    = "BEGIN:VALARM"
 	endVAlarm      = "END:VALARM"
+	beginVTimezone = "BEGIN:VTIMEZONE"
+	endVTimezone   = "END:VTIMEZONE"
+	beginStandard  = "BEGIN:STANDARD"
+	endStandard    = "END:STANDARD"
+	beginDaylight  = "BEGIN:DAYLIGHT"
+	endDaylight    = "END:DAYLIGHT"
 )
 
 func lexContentLine(l *lexer) stateFn {
@@ -171,12 +174,12 @@ func lexContentLine(l *lexer) stateFn {
 	case r == ';':
 		l.emit(itemSemiColon)
 		return lexParamName
-	case r == ':':
-		l.emit(itemColon)
-		return lexValue
 	case r == ',':
 		l.emit(itemComma)
 		return lexParamValue
+	case r == ':':
+		l.emit(itemColon)
+		return lexValue
 	default:
 		return l.errorf("unrecognized character in action: %#U", r)
 	}
@@ -199,7 +202,6 @@ func lexNewLine(l *lexer) stateFn {
 		l.emit(itemEOF)
 		return nil
 	}
-
 	l.backup()
 
 	return lexName
@@ -212,38 +214,128 @@ func lexNewLine(l *lexer) stateFn {
 // x-name     = "X-" [vendorid "-"] 1*(ALPHA / DIGIT / "-") ; Reserved for experimental use.
 // vendorid   = 3*(ALPHA / DIGIT) ; Vendor identification
 func lexName(l *lexer) stateFn {
+
+	if debug {
+		fmt.Println("\n\n\nlexName(): ", " start:", l.start, " pos:", l.pos, " width:", l.width, " lastPos:", l.lastPos, " len:", len(l.input))
+	}
+
+	// BEGIN:VCALENDAR
 	if strings.HasPrefix(l.input[l.pos:], beginVCalendar) {
 		l.pos += len(beginVCalendar)
 		l.emit(itemBeginVCalendar)
+		if debug {
+			fmt.Println("lexNewLine(): ", beginVCalendar)
+		}
 		return lexNewLine
 	}
 
+	// END:VCALENDAR
 	if strings.HasPrefix(l.input[l.pos:], endVCalendar) {
 		l.pos += len(endVCalendar)
 		l.emit(itemEndVCalendar)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVCalendar)
+		}
 		return lexNewLine
 	}
 
+	// BEGIN:VEVENT
 	if strings.HasPrefix(l.input[l.pos:], beginVEvent) {
 		l.pos += len(beginVEvent)
 		l.emit(itemBeginVEvent)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVCalendar)
+		}
 		return lexNewLine
 	}
 
+	// END:VEVENT
 	if strings.HasPrefix(l.input[l.pos:], endVEvent) {
 		l.pos += len(endVEvent)
 		l.emit(itemEndVEvent)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVCalendar)
+		}
 		return lexNewLine
 	}
 
+	// BEGIN:VALARM
 	if strings.HasPrefix(l.input[l.pos:], beginValarm) {
 		l.pos += len(beginValarm)
 		l.emit(itemBeginVAlarm)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVCalendar)
+		}
 		return lexNewLine
 	}
+
+	// END:VALARM
 	if strings.HasPrefix(l.input[l.pos:], endVAlarm) {
 		l.pos += len(endVAlarm)
 		l.emit(itemEndVAlarm)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVCalendar)
+		}
+		return lexNewLine
+	}
+
+	// BEGIN:VTIMEZONE
+	if strings.HasPrefix(l.input[l.pos:], beginVTimezone) {
+		l.pos += len(beginVTimezone)
+		l.emit(itemBeginVTimezone)
+		if debug {
+			fmt.Println("lexNewLine(): ", beginVTimezone)
+		}
+		return lexNewLine
+	}
+
+	// END:VTIMEZONE
+	if strings.HasPrefix(l.input[l.pos:], endVTimezone) {
+		l.pos += len(endVTimezone)
+		l.emit(itemEndVTimezone)
+		if debug {
+			fmt.Println("lexNewLine(): ", endVTimezone)
+		}
+		return lexNewLine
+	}
+
+	// BEGIN:STANDARD
+	if strings.HasPrefix(l.input[l.pos:], beginStandard) {
+		l.pos += len(beginStandard)
+		l.emit(itemBeginStandard)
+		if debug {
+			fmt.Println("lexNewLine(): ", beginStandard)
+		}
+		return lexNewLine
+	}
+
+	// END:STANDARD
+	if strings.HasPrefix(l.input[l.pos:], endStandard) {
+		l.pos += len(endStandard)
+		l.emit(itemEndStandard)
+		if debug {
+			fmt.Println("lexNewLine(): ", endStandard)
+		}
+		return lexNewLine
+	}
+
+	// BEGIN:DAYLIGHT
+	if strings.HasPrefix(l.input[l.pos:], beginDaylight) {
+		l.pos += len(beginDaylight)
+		l.emit(itemBeginDaylight)
+		if debug {
+			fmt.Println("lexNewLine(): ", beginDaylight)
+		}
+		return lexNewLine
+	}
+
+	// END:DAYLIGHT
+	if strings.HasPrefix(l.input[l.pos:], endDaylight) {
+		l.pos += len(endDaylight)
+		l.emit(itemEndDaylight)
+		if debug {
+			fmt.Println("lexNewLine(): ", endDaylight)
+		}
 		return lexNewLine
 	}
 
@@ -252,12 +344,23 @@ Loop:
 		switch r := l.next(); {
 		case isName(r):
 			// absorb
+			if debug {
+				fmt.Println("isName(): ", "[", r, "]", "<", string(r), ">")
+			}
 		default:
+			if debug {
+				fmt.Println("isName(): ", "[", r, "]", "<", string(r), ">")
+			}
 			l.backup()
 			l.emit(itemName)
 			break Loop
 		}
 	}
+
+	if debug {
+		fmt.Println("lexContentLine()")
+	}
+
 	return lexContentLine
 }
 
@@ -279,9 +382,7 @@ Loop:
 			break Loop
 		}
 	}
-
 	r := l.next()
-
 	if r == '=' {
 		l.emit(itemEqual)
 		return lexParamValue
@@ -312,9 +413,7 @@ func lexParamValue(l *lexer) stateFn {
 				break QLoop
 			}
 		}
-
 		r := l.next()
-
 		if r != '"' {
 			l.errorf("Missing \" for closing value")
 		} else {
@@ -334,7 +433,6 @@ func lexParamValue(l *lexer) stateFn {
 			}
 		}
 	}
-
 	return lexContentLine
 }
 
@@ -354,31 +452,5 @@ Loop:
 			break Loop
 		}
 	}
-
 	return lexNewLine
-}
-
-// rune helpers
-
-func isName(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-'
-}
-
-func isQSafeChar(r rune) bool {
-	return !unicode.IsControl(r) && r != '"'
-}
-
-func isSafeChar(r rune) bool {
-	return !unicode.IsControl(r) && r != '"' && r != ';' && r != ':' && r != ','
-}
-
-func isValueChar(r rune) bool {
-	return r == '\t' || (!unicode.IsControl(r) && utf8.ValidRune(r))
-}
-
-// item helpers
-
-// isItemName checks if the item is an ical name
-func isItemName(i item) bool {
-	return i.typ == itemName
 }

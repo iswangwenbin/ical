@@ -1,0 +1,61 @@
+../fixtures/icalendar.ics
+
+
+
+lexName():   start: 0  pos: 0  width: 0  lastPos: 0  len: 1381
+string: <BEGIN:VCALENDAR> [BEGIN:VCALENDAR]
+emit():  start:0 pos:15 t:12
+
+lexNewLine():  BEGIN:VCALENDAR
+peek(): 13 1 
+{{ <BEGIN:VCALENDAR> }}
+string: "\r\n" [
+]
+emit():  start:15 pos:17 t:2
+
+
+
+
+lexName():   start: 17  pos: 17  width: 1  lastPos: 0  len: 1381
+isName():  [ 86 ] < V >
+isName():  [ 69 ] < E >
+isName():  [ 82 ] < R >
+isName():  [ 83 ] < S >
+isName():  [ 73 ] < I >
+isName():  [ 79 ] < O >
+{{ "\r\n" }}
+isName():  [ 78 ] < N >
+isName():  [ 58 ] < : >
+string: "VERSION" [VERSION]
+emit():  start:17 pos:24 t:3
+
+lexContentLine()
+string: ":" [:]
+{{ "VERSION" }}
+emit():  start:24 pos:25 t:7
+
+string: "2.0" [2.0]
+emit():  start:25 pos:28 t:6
+
+{{ ":" }}
+{{ "2.0" }}
+peek(): 13 1 
+string: "\r\n" [
+]
+emit():  start:28 pos:30 t:2
+
+
+
+
+lexName():   start: 30  pos: 30  width: 1  lastPos: 25  len: 1381
+isName():  [ 80 ] < P >
+isName():  [ 82 ] < R >
+isName():  [ 79 ] < O >
+isName():  [ 68 ] < D >
+isName():  [ 73 ] < I >
+isName():  [ 68 ] < D >
+isName():  [ 58 ] < : >
+string: "PRODID" [PRODID]
+{{ "\r\n" }}
+{ 0 }emit():  start:30 pos:36 t:3
+
